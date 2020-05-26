@@ -8,70 +8,66 @@ import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.IO.Unsafe
 
 
-data Interface = Interface
-  { iFullDeck :: Hand
-  , iValue    :: Hand -> Int
-  , iDisplay  :: Hand -> String
-  , iGameOver :: Hand -> Bool
-  , iWinner   :: Hand -> Hand -> Player
-  , iDraw     :: Hand -> Hand -> (Hand, Hand)
-  , ibankDraw :: Hand -> Hand
-  , iShuffle  :: StdGen -> Hand -> (Hand,StdGen)
-  , iMassShuffle :: Hand -> Int -> StdGen -> Hand
-  }
-
-implementation = Interface
-  {  iFullDeck  = fullDeck
-  ,  iValue     = value
-  ,  iDisplay   = display
-  ,  iGameOver  = gameOver
-  ,  iWinner    = winner
-  ,  iDraw      = draw
-  ,  ibankDraw  = bankDraw
-  ,  iShuffle   = shuffle
-  ,  iMassShuffle   = massShuffle
-  }
-
-main :: IO ()
-main = runGame implementation
 
 
--- Runs a game given an implementation of the interface.
+-- main function
 
-runGame :: Interface -> IO ()
-runGame i = do
+runGame :: IO ()
+runGame = do
   putStrLn "Welcome to the game."
-  
-  gameLoop i (iMassShuffle i (iFullDeck i) 10 (mkStdGen 10)) Empty
+  gameLoop (massShuffle fullDeck  10 (mkStdGen (unsafePerformIO (getStdRandom (randomR(1,9223372036854775807)))))) Empty Empty "Player 1" False False
 
--- Play until the guest player is bust or chooses to stop.
+--Defines the turn of a player (if he chooses to draw a card or not)
 
-gameLoop :: Interface -> Hand -> Hand -> IO ()
-gameLoop i deck playerHand = do
-  putStrLn $ "Your current score: " ++ show (iValue i playerHand) ++ "\n"
-  putStrLn $ "Your current hand: " ++ iDisplay i playerHand ++ "\n"
-  if iGameOver i playerHand then do
-    finish i deck playerHand
-   else do
-    putStr (   "Draw "
-            ++ (if playerHand==Empty then "a " else "another ")
-            ++ "card? [y/n] ")
-    yn <- getLine
-    if null yn || not (map toLower yn == "n") then do
-      let (deck', playerHand') = iDraw i deck playerHand
-      gameLoop i deck' playerHand'
-     else
-      finish i deck playerHand
+turn :: Hand -> Hand -> String -> (Hand,Hand, Bool)
+turn deck hand yn = if null yn || not (map toLower yn == "n") then case (draw deck hand) of
+                                                                     (x, y) -> (x, y, False)
+                 else (deck,hand, True)
 
--- Display the bank's final score and the winner.
+-- Game loop of the server. It ends whenever both players either go bust or type "n" to end their turn                
 
-finish :: Interface -> Hand -> Hand -> IO ()
-finish i deck playerHand = do
-  putStrLn $ "Your final score: " ++ show( iValue i playerHand)
-  putStrLn $ "Your final hand: " ++ iDisplay i playerHand
-  putStrLn $ "The bank's final score: "++ show (iValue i bank)
-  putStrLn $ "Bank's final hand: " ++ iDisplay i bank
-  putStrLn $ "Winner: " ++ show (iWinner i playerHand bank)
+gameLoop :: Hand -> Hand -> Hand -> String -> Bool -> Bool -> IO ()
+gameLoop deck playerHand1 playerHand2 currentPlayer over1 over2 = do
+  if currentPlayer == "Player 1" then do
+   putStrLn "-----------------------------------------------------------------\n"
+   putStrLn "                       Player 1's turn\n"
+   putStrLn $ currentPlayer ++ "'s score: " ++ show (value playerHand1)
+   putStrLn $ currentPlayer ++ "'s hand: " ++ display playerHand1 ++ "\n"
+  else do
+   putStrLn "-----------------------------------------------------------------\n"
+   putStrLn "                       Player 2's turn\n"
+   putStrLn $ currentPlayer ++ "'s score: " ++ show (value playerHand2) 
+   putStrLn $ currentPlayer ++ "'s hand: " ++ display playerHand2 ++ "\n"
+  if ((gameOver playerHand1) || over1) && ((gameOver playerHand2) || over2) then do
+    finish deck playerHand1 playerHand2
+  else do 
+   putStrLn (   "Draw a card? [y/n] ")
+   yn <- getLine
+   if currentPlayer == "Player 1" then do
+     if ((gameOver playerHand1) || over1) then do
+      gameLoop deck playerHand1 playerHand2 "Player 2" over1 over2
+     else do 
+       let (deck',hand', isOver)=turn deck playerHand1 yn
+       gameLoop deck' hand' playerHand2 "Player 2" isOver over2
+   else do 
+    if ((gameOver playerHand2) || over2) then do
+     gameLoop deck playerHand1 playerHand2 "Player 1" over1 over2
+    else do 
+      case turn deck playerHand2 yn of
+        (deck',hand', isOver) -> gameLoop deck' playerHand1 hand' "Player 1" over1 isOver
+
+--Display the final scores and the winners
+
+finish :: Hand -> Hand -> Hand -> IO ()
+finish deck playerHand1 playerHand2 = do
+  putStrLn "-----------------------------------------------------------------\n"
+  putStrLn $ "Player1's final score: " ++ show( value playerHand1) 
+  putStrLn $ "Player1's final hand: " ++ display playerHand1 ++ "\n"
+  putStrLn $ "Player2's final score: " ++ show( value playerHand2) 
+  putStrLn $ "Player2's final hand: " ++ display playerHand2 ++ "\n"
+  putStrLn $ "The bank's final score: "++ show (value bank) 
+  putStrLn $ "Bank's final hand: " ++ display bank ++ "\n"
+  putStrLn $ "Winner: " ++ show (winner playerHand1 playerHand2 bank)
   where
-  bank = ibankDraw i deck
+  bank = bankDraw deck
 
